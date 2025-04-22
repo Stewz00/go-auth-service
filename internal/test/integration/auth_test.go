@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 		os.Setenv("JWT_SECRET", "test-secret")
 	}
 	if os.Getenv("DATABASE_URL") == "" {
-		os.Setenv("DATABASE_URL", "postgres://postgres:***REMOVED***@localhost:5432/authdb_test?sslmode=disable")
+		os.Setenv("DATABASE_URL", "postgres://test_user:testme@localhost:5432/authdb_test?sslmode=disable")
 	}
 
 	// Load config
