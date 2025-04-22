@@ -29,6 +29,7 @@ Go Auth Service is a lightweight, modular authentication service written in Go. 
    GRANT CREATE, CONNECT ON DATABASE authdb TO auth_user;
 
    -- For testing (if you plan to run tests)
+   -- test_user is the default user used in the test database URL if not set in .env.test
    CREATE USER test_user WITH PASSWORD 'testme';
    GRANT ALL PRIVILEGES ON DATABASE authdb_test TO test_user;
    ```
