@@ -19,6 +19,37 @@ Go Auth Service is a lightweight, modular authentication service written in Go. 
 - A running PostgreSQL instance.
 - Environment variables configured in `.env` (development) or `.env.test` (testing).
 
+### Database Setup 🗄️
+
+1. Create a database user with appropriate privileges:
+
+   ```sql
+   -- For development
+   CREATE USER auth_user WITH PASSWORD 'your_secure_password';
+   GRANT CREATE, CONNECT ON DATABASE authdb TO auth_user;
+
+   -- For testing (if you plan to run tests)
+   CREATE USER test_user WITH PASSWORD 'testme';
+   GRANT ALL PRIVILEGES ON DATABASE authdb_test TO test_user;
+   ```
+
+2. After creating the database and user, connect as the new user to create the schema:
+   ```bash
+   psql -U auth_user -d authdb -f internal/database/schema.sql
+   ```
+
+The module requires the following minimum permissions for the database user:
+
+- SELECT, INSERT, UPDATE, DELETE on the `users` and `sessions` tables
+- USAGE on sequences (for ID generation)
+- CREATE permission (only needed for initial schema setup)
+
+For production deployments, it's recommended to:
+
+1. Use different users for development and production
+2. Grant only the minimum required permissions
+3. Use SSL connections (sslmode=require in connection string)
+
 ### Installation 📦
 
 1. Clone the repository:
