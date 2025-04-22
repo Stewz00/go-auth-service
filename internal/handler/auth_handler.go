@@ -3,8 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 
+	"github.com/Stewz00/go-auth-service/internal/repository"
 	"github.com/Stewz00/go-auth-service/internal/service"
 )
 
@@ -33,6 +35,14 @@ type AuthResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// Validate checks if an email is valid
+func isValidEmail(email string) bool {
+	// Simple regex for email validation
+	emailRegex := `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+	re := regexp.MustCompile(emailRegex)
+	return re.MatchString(email)
+}
+
 // Register handles user registration
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
@@ -44,6 +54,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Basic validation
 	if req.Email == "" || req.Password == "" {
 		sendJSONError(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	if !isValidEmail(req.Email) {
+		sendJSONError(w, "Invalid email format", http.StatusBadRequest)
 		return
 	}
 
@@ -76,17 +91,20 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.authService.LoginUser(r.Context(), req.Email, req.Password)
 	if err != nil {
-		code := http.StatusInternalServerError
 		switch err {
 		case service.ErrInvalidCredentials:
-			code = http.StatusUnauthorized
-		case service.ErrAccountLocked:
-			code = http.StatusForbidden
+			sendJSONError(w, "Invalid email or password", http.StatusUnauthorized)
+			return
+		case service.ErrAccountLocked, repository.ErrTooManyAttempts:
+			sendJSONError(w, "Account is locked due to too many failed attempts", http.StatusForbidden)
+			return
+		default:
+			sendJSONError(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
-		sendJSONError(w, err.Error(), code)
-		return
 	}
 
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(AuthResponse{Token: token})
 }
 
@@ -99,7 +117,11 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.authService.LogoutUser(r.Context(), token); err != nil {
-		sendJSONError(w, "Failed to logout", http.StatusInternalServerError)
+		code := http.StatusInternalServerError
+		if err == service.ErrInvalidToken {
+			code = http.StatusUnauthorized
+		}
+		sendJSONError(w, err.Error(), code)
 		return
 	}
 
