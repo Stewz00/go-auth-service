@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Stewz00/go-auth-service/internal/interfaces"
 	"github.com/Stewz00/go-auth-service/internal/model"
 	"github.com/Stewz00/go-auth-service/internal/repository"
 	"github.com/golang-jwt/jwt/v5"
@@ -14,16 +15,18 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrAccountLocked      = errors.New("account is locked due to too many failed attempts")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrTokenExpired       = errors.New("token has expired")
 )
 
 type AuthService struct {
-	userRepo    *repository.UserRepository
+	userRepo    interfaces.UserRepository
 	jwtSecret   []byte
 	tokenExpiry time.Duration
 }
 
 // NewAuthService creates a new authentication service
-func NewAuthService(userRepo *repository.UserRepository, jwtSecret string) *AuthService {
+func NewAuthService(userRepo interfaces.UserRepository, jwtSecret string) *AuthService {
 	return &AuthService{
 		userRepo:    userRepo,
 		jwtSecret:   []byte(jwtSecret),
@@ -52,6 +55,11 @@ func (s *AuthService) LoginUser(ctx context.Context, email, password string) (st
 		return "", err
 	}
 
+	// Check if account is already locked
+	if user.FailedAttempts >= 5 {
+		return "", ErrAccountLocked
+	}
+
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
 		// Increment failed login attempts
@@ -64,21 +72,26 @@ func (s *AuthService) LoginUser(ctx context.Context, email, password string) (st
 		return "", ErrInvalidCredentials
 	}
 
+	// Reset failed attempts and update last login on successful authentication
+	if err := s.userRepo.UpdateLastLogin(ctx, user.ID); err != nil {
+		return "", err
+	}
+
 	// Generate JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   user.ID,
 		"email": user.Email,
 		"exp":   time.Now().Add(s.tokenExpiry).Unix(),
-		"jti":   generateTokenID(), // Unique token ID for revocation
+		"jti":   generateTokenID(),
 	})
 
-	// Sign the token
+	// Sign and return the token
 	tokenString, err := token.SignedString(s.jwtSecret)
 	if err != nil {
 		return "", err
 	}
 
-	// Store session in database
+	// Store the session
 	claims := token.Claims.(jwt.MapClaims)
 	err = s.userRepo.CreateSession(
 		ctx,
@@ -90,41 +103,39 @@ func (s *AuthService) LoginUser(ctx context.Context, email, password string) (st
 		return "", err
 	}
 
-	// Update last login time
-	if err := s.userRepo.UpdateLastLogin(ctx, user.ID); err != nil {
-		return "", err
-	}
-
 	return tokenString, nil
 }
 
 // ValidateToken validates a JWT token and returns the user claims
 func (s *AuthService) ValidateToken(ctx context.Context, tokenString string) (jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
+			return nil, ErrInvalidToken
 		}
 		return s.jwtSecret, nil
 	})
 
 	if err != nil {
-		return nil, err
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, ErrTokenExpired
+		}
+		return nil, ErrInvalidToken
 	}
 
 	if !token.Valid {
-		return nil, errors.New("invalid token")
+		return nil, ErrInvalidToken
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, errors.New("invalid token claims")
+		return nil, ErrInvalidToken
 	}
 
 	// Check if token is revoked
 	if valid, err := s.userRepo.IsSessionValid(ctx, claims["jti"].(string)); err != nil {
 		return nil, err
 	} else if !valid {
-		return nil, errors.New("token is revoked or expired")
+		return nil, ErrInvalidToken
 	}
 
 	return claims, nil
@@ -132,16 +143,26 @@ func (s *AuthService) ValidateToken(ctx context.Context, tokenString string) (jw
 
 // LogoutUser revokes the user's token
 func (s *AuthService) LogoutUser(ctx context.Context, tokenString string) error {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, ErrInvalidToken
+		}
 		return s.jwtSecret, nil
 	})
 	if err != nil {
-		return err
+		return ErrInvalidToken
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return errors.New("invalid token claims")
+		return ErrInvalidToken
+	}
+
+	// Check if token is already revoked before attempting to revoke
+	if valid, err := s.userRepo.IsSessionValid(ctx, claims["jti"].(string)); err != nil {
+		return err
+	} else if !valid {
+		return ErrInvalidToken
 	}
 
 	return s.userRepo.RevokeSession(ctx, claims["jti"].(string))
