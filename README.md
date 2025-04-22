@@ -5,19 +5,19 @@ Go Auth Service is a lightweight, modular authentication service written in Go. 
 ## Features ✨
 
 - **User Authentication**: Secure user registration and login with hashed passwords (bcrypt).
-- **JWT Tokens**: Stateless authentication using JSON Web Tokens. 🔐
-- **Rate Limiting**: Protect endpoints with IP-based rate limiting. 🚦
-- **PostgreSQL Integration**: Store user data and sessions securely in a PostgreSQL database. 🗄️
-- **Account Locking**: Lock accounts after multiple failed login attempts to prevent brute force attacks. 🚫
-- **Session Management**: Track and revoke active sessions. 🔄
+- **JWT Tokens**: Stateless authentication using JSON Web Tokens with 24-hour expiry. 🔐
+- **Smart Rate Limiting**: Two-tier rate limiting protection - strict (10 req/min) for auth endpoints and standard (100 req/min) for other endpoints. 🚦
+- **PostgreSQL Integration**: Store user data and sessions securely in a PostgreSQL database with connection pooling. 🗄️
+- **Account Security**: Automatic account locking after exactly 5 failed login attempts. 🚫
+- **Session Management**: Track and revoke active sessions with database-backed validation. 🔄
 
 ## Getting Started 🛠️
 
 ### Prerequisites 📋
 
-- Go 1.20+ installed on your system.
+- Go 1.24+ installed on your system.
 - A running PostgreSQL instance.
-- Environment variables configured in a `.env` file or your system.
+- Environment variables configured in `.env` (development) or `.env.test` (testing).
 
 ### Installation 📦
 
@@ -142,12 +142,12 @@ The service includes both unit tests and integration tests to ensure reliability
 Unit tests use mock implementations and can be run without a database:
 
 ```bash
-go test ./internal/service/... -v
+go test ./internal/service/... ./internal/handler/... ./internal/middleware/... -v
 ```
 
 #### Running Integration Tests
 
-Integration tests require a PostgreSQL test database. Before running:
+Integration tests require a PostgreSQL test database and proper configuration. Follow these steps:
 
 1. Create a test database:
 
@@ -161,7 +161,15 @@ Integration tests require a PostgreSQL test database. Before running:
    psql -U postgres -d authdb_test -f internal/database/schema.sql
    ```
 
-3. Run the integration tests:
+3. Set up test configuration in `.env.test`:
+
+   ```env
+   PORT=8081
+   JWT_SECRET=test-secret
+   DATABASE_URL=postgres://postgres:postgres@localhost:5432/authdb_test?sslmode=disable
+   ```
+
+4. Run the integration tests:
    ```bash
    go test ./internal/test/integration/... -v
    ```
@@ -179,28 +187,34 @@ go tool cover -html=coverage.out
 
 1. **Unit Tests**:
 
-   - User registration
-   - Login authentication
-   - JWT token validation
-   - Session management
-   - Account lockout mechanism
+   - User registration validation
+   - Login authentication flow
+   - JWT token generation and validation
+   - Session management (creation, validation, revocation)
+   - Account lockout mechanism (5 failed attempts)
+   - Rate limiting middleware
+   - Request handler validation
 
 2. **Integration Tests**:
    - Complete authentication flow (register → login → logout)
    - Failed login attempts and account locking
-   - Token revocation
+   - Token invalidation after logout
    - Database interactions
    - API endpoint responses
+   - Concurrent session handling
+   - Error scenarios and edge cases
 
-#### Running with Test Environment
+Each test suite includes proper setup and cleanup to ensure test isolation. Integration tests use a separate test database and environment configuration to prevent interference with development or production environments.
 
-For development, you can use the test environment configuration:
+#### Test Environment Setup
 
-```env
-PORT=8080
-JWT_SECRET=test-secret
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/authdb_test?sslmode=disable
-```
+The test suite uses a dedicated `.env.test` configuration file to separate test settings from development and production. This ensures that tests:
+
+1. Use a separate test database
+2. Run on a different port
+3. Use test-specific secrets and configuration
+
+The test environment automatically cleans up between test runs to ensure consistent results.
 
 ### Security Features 🔒
 
